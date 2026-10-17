@@ -1,0 +1,4 @@
+# Переводы строк везде как в Unix: на Windows git иначе переписывает файлы в CRLF, и тесты видят не то, что получают ученики
+* text=auto eol=lf
+*.png binary
+*.zip binary

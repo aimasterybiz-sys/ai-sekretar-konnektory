@@ -143,11 +143,16 @@ def ustanovit(sek):
     # 1. новые файлы
     for otn in NOVYE:
         istochnik, tsel = ZDES / "fayly" / otn, sek / otn
-        if tsel.exists() and tsel.read_bytes() == istochnik.read_bytes():
-            continue
+        novoe = istochnik.read_text(encoding="utf-8-sig")  # переводы строк — как в Unix, откуда бы ни взялся источник
+        if tsel.exists():
+            try:
+                if tsel.read_text(encoding="utf-8-sig") == novoe:
+                    continue
+            except UnicodeDecodeError:
+                pass
         sokhranit_kopiyu(otn)
         tsel.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(istochnik, tsel)
+        tsel.write_text(novoe, encoding="utf-8", newline="\n")
         itog.append(f"✓ {otn}")
 
     # 2. точечные правки общих файлов

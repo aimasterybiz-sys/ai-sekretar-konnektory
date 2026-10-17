@@ -112,9 +112,9 @@ def obnovit_sekretarya(sek, itog):
     mcp_izmenen = ispravit(sek, itog, rezerv)
     # «Проверь коннекторы»
     istochnik, tsel = ZDES / "proverka.py", sek / "SKRIPTY" / "proverka.py"
-    if not tsel.exists() or tsel.read_bytes() != istochnik.read_bytes():
+    if pravki.chitat(tsel) != pravki.chitat(istochnik) if tsel.exists() else True:
         kopiya(tsel, rezerv)
-        shutil.copy2(istochnik, tsel)
+        pravki.pisat(tsel, pravki.chitat(istochnik))
         itog.append("✓ проверка «Проверь коннекторы» поставлена")
     cl = sek / "CLAUDE.md"
     t = pravki.chitat(cl)
@@ -141,10 +141,19 @@ def obnovit_wa_claude(papka, itog):
         if f.is_dir():
             continue
         tsel = papka / "SKRIPTY" / f.name
-        if tsel.exists() and tsel.read_bytes() == f.read_bytes():
-            continue
-        kopiya(tsel, rezerv)
-        shutil.copy2(f, tsel)
+        # текстовые файлы — через чтение/запись: переводы строк всегда как в Unix, откуда бы ни взялся источник
+        tekstovyy = f.suffix in (".py", ".md", ".txt")
+        novoe = pravki.chitat(f) if tekstovyy else None
+        if tekstovyy and novoe is not None:
+            if pravki.chitat(tsel) == novoe:
+                continue
+            kopiya(tsel, rezerv)
+            pravki.pisat(tsel, novoe)
+        else:
+            if tsel.exists() and tsel.read_bytes() == f.read_bytes():
+                continue
+            kopiya(tsel, rezerv)
+            shutil.copy2(f, tsel)
         pomenyal = True
     for f in ("USTANOVKA.md",):
         if (istochnik / f).exists():
