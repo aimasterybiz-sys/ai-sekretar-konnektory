@@ -40,7 +40,7 @@ def test_na_windows_wacli_zapuskaetsya_bez_okna():
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="ошибка бывает только на Windows")
-@pytest.mark.xfail(strict=False, reason="показывает исходную ошибку: старый код падает на Windows")
+# подтверждено на GitHub Windows 17.10.2026: старый код падает на дате 0001-01-01
 def test_staryy_kod_padal_na_windows(tmp_path):
     shutil.copytree(OBRAZTSY / "WhatsApp-Claude" / "SKRIPTY", tmp_path / "S")
     kod, vyvod = kod_python(CHATY, tmp_path / "S")
