@@ -1,0 +1,40 @@
+name: Проверка выпуска — как у ученика
+
+# После публикации выпуска: скачать konnektory.zip по той же ссылке, что в инструкции для учеников,
+# распаковать и запустить обновление на образце папки ученика — на чистых Windows и Mac.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  vypusk:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Скачать как ученик
+        shell: bash
+        run: |
+          sleep 20
+          curl -fL -o konnektory.zip https://github.com/${{ github.repository }}/releases/latest/download/konnektory.zip
+          python -c "import zipfile; zipfile.ZipFile('konnektory.zip').extractall('skachano')"
+      - name: Обновить образец папки ученика
+        shell: bash
+        run: |
+          mkdir -p uchenik/home
+          cp -R "tests/obraztsy/02_sekretar" "uchenik/home/02_sekretar"
+          cp -R "tests/obraztsy/WhatsApp-Claude" "uchenik/home/WhatsApp-Claude"
+          cd "uchenik/home/02_sekretar"
+          HOME="$GITHUB_WORKSPACE/uchenik/home" USERPROFILE="$GITHUB_WORKSPACE\\uchenik\\home" \
+            python "$GITHUB_WORKSPACE/skachano/konnektory/obnovit.py" | tee "$GITHUB_WORKSPACE/otchet.txt"
+          grep -q "ГОТОВО" "$GITHUB_WORKSPACE/otchet.txt"
+          test -f SKRIPTY/pochta.py
+          grep -q "t.year < 1971" SKRIPTY/wa.py
+          grep -q "VSEGDA_SPRASHIVAT" SKRIPTY/mcp_messendzhery.py
