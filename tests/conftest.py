@@ -32,8 +32,10 @@ def zapustit(skript, *args, home, cwd, kodirovka="cp1252", timeout=300):
     return r.returncode, r.stdout.decode("utf-8", "replace") + r.stderr.decode("utf-8", "replace")
 
 
-def kod_python(kod, cwd, timeout=120):
+def kod_python(kod, cwd, timeout=120, home=None):
     """Выполнить кусок Python в отдельном процессе (модули wa/obshchee из разных папок не смешиваются)."""
-    r = subprocess.run([sys.executable, "-c", kod], cwd=str(cwd), capture_output=True, timeout=timeout,
-                       env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+    env = dict(os.environ, PYTHONIOENCODING="utf-8")
+    if home:
+        env.update(HOME=str(home), USERPROFILE=str(home))
+    r = subprocess.run([sys.executable, "-c", kod], cwd=str(cwd), capture_output=True, timeout=timeout, env=env)
     return r.returncode, r.stdout.decode("utf-8", "replace") + r.stderr.decode("utf-8", "replace")

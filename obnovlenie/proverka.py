@@ -20,8 +20,9 @@ ZDES = Path(__file__).resolve().parent
 SEK = ZDES.parent if (ZDES.parent / "CLAUDE.md").exists() else None
 WA_CLAUDE = Path.home() / "WhatsApp-Claude"
 PRAVILA_SPRASHIVAT = ["mcp__whatsapp__whatsapp_otpravit", "mcp__messendzhery__whatsapp_otpravit",
-                      "mcp__messendzhery__telegram_otpravit", "Bash(*pochta.py otpravit*)",
-                      "Bash(*wa.py otpravit*)", "Bash(*tg_otpravit.py*)"]
+                      "mcp__messendzhery__telegram_otpravit"] + [
+    f"{shell}(*{skript} otpravit*)" if skript != "tg_otpravit.py" else f"{shell}(*tg_otpravit.py*)"
+    for shell in ("Bash", "PowerShell") for skript in ("pochta.py", "wa.py", "tg_otpravit.py")]
 BEZ_OKNA = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
 
 
@@ -70,8 +71,12 @@ def main():
 
     razdel("WhatsApp")
     nashel = False
+    est_wa_claude = (WA_CLAUDE / "NASTROYKI" / "wacli").exists()
     for imya, papka in (("в секретаре", SEK), ("WhatsApp в Claude", WA_CLAUDE)):
-        if papka and (papka / "SKRIPTY" / "wa.py").exists() and (papka / "NASTROYKI" / "wacli").exists():
+        if not papka or not (papka / "SKRIPTY" / "wa.py").exists():
+            continue
+        # у секретаря вход может быть свой, а может быть общий с «WhatsApp в Claude»
+        if (papka / "NASTROYKI" / "wacli").exists() or (papka == SEK and est_wa_claude):
             nashel = True
             print(f"{imya}:\n" + otstup(zapustit(papka / "SKRIPTY" / "wa.py", "doctor")))
     if not nashel:
@@ -96,10 +101,14 @@ def main():
     print("✓ Перед каждой отправкой Claude спрашивает «Разрешить?»" if not net else
           "✗ Не везде Claude спрашивает перед отправкой. Скажите Claude: «Обнови коннекторы секретаря».")
     for papka in (SEK, WA_CLAUDE):
-        for f in ("mcp_messendzhery.py", "mcp_whatsapp.py"):
+        for f, priznaki in (("mcp_messendzhery.py", ("VSEGDA_SPRASHIVAT",)), ("mcp_whatsapp.py", ("VSEGDA_SPRASHIVAT",)),
+                            ("wa.py", ("t.year < 1971", "BEZ_OKNA", "CHUZHOY_VKHOD"))):
             p = papka / "SKRIPTY" / f if papka else None
-            if p and p.exists() and "VSEGDA_SPRASHIVAT" not in p.read_text(encoding="utf-8"):
-                print(f"✗ {f} старой версии. Скажите Claude: «Обнови коннекторы секретаря».")
+            if not p or not p.exists():
+                continue
+            t = p.read_text(encoding="utf-8", errors="replace")
+            if not all(x in t for x in priznaki):
+                print(f"✗ {f} старой версии ({papka.name}). Скажите Claude: «Обнови коннекторы секретаря».")
     print("\nЕсли где-то ✗ — пришлите снимок этого отчёта организатору.")
 
 

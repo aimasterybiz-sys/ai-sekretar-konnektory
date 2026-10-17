@@ -31,10 +31,12 @@ sys.path.insert(0, str(ZDES))
 import pravki  # noqa: E402
 
 VERSIYA = (BAZA / "VERSIYA").read_text(encoding="utf-8").strip() if (BAZA / "VERSIYA").exists() else "?"
-METKA = datetime.now().strftime("%Y-%m-%d-%H%M")
+METKA = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+# На Windows Claude Code работает в PowerShell, и правила для Bash его не касаются — поэтому оба набора
 PRAVILA_SPRASHIVAT = ["mcp__whatsapp__whatsapp_otpravit", "mcp__messendzhery__whatsapp_otpravit",
-                      "mcp__messendzhery__telegram_otpravit", "Bash(*pochta.py otpravit*)",
-                      "Bash(*wa.py otpravit*)", "Bash(*tg_otpravit.py*)"]
+                      "mcp__messendzhery__telegram_otpravit"] + [
+    f"{shell}(*{skript} otpravit*)" if skript != "tg_otpravit.py" else f"{shell}(*tg_otpravit.py*)"
+    for shell in ("Bash", "PowerShell") for skript in ("pochta.py", "wa.py", "tg_otpravit.py")]
 STROKA_PROVERKI = ("- «Проверь коннекторы» — запусти `python SKRIPTY/proverka.py` (на Mac `python3`) и покажи отчёт "
                    "как есть, ничего не сокращая.")
 BEZ_OKNA = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
@@ -67,6 +69,9 @@ def nayti_sekretarya(yavno):
     # рабочая папка — та, где уже есть вход в Telegram или подключённые ящики
     kandidaty.sort(key=lambda p: ((p / "NASTROYKI" / "secretary.session").exists(),
                                   (p / "NASTROYKI").stat().st_mtime if (p / "NASTROYKI").exists() else 0), reverse=True)
+    if len(kandidaty) > 1:
+        print("Нашёл несколько папок 02_sekretar, обновляю рабочую. Остальные: "
+              + "; ".join(str(p) for p in kandidaty[1:]) + " — если нужна другая, откройте Claude в ней.", flush=True)
     return kandidaty[0]
 
 
@@ -84,12 +89,13 @@ def ispravit(papka, itog, rezerv):
     for f in sorted((papka / "SKRIPTY").glob("*.py")):
         if f.name not in pravki.PRAVKI:
             continue
-        do = f.read_text(encoding="utf-8")
+        do = f.read_bytes()
         stroki = pravki.primenit(f)
-        if f.read_text(encoding="utf-8") != do:
+        if f.read_bytes() != do:
             pomenyal = True
             rezerv.mkdir(parents=True, exist_ok=True)
-            (rezerv / f.name).write_text(do, encoding="utf-8") if not (rezerv / f.name).exists() else None
+            if not (rezerv / f.name).exists():
+                (rezerv / f.name).write_bytes(do)
         itog += stroki
     return pomenyal
 
@@ -111,15 +117,18 @@ def obnovit_sekretarya(sek, itog):
         shutil.copy2(istochnik, tsel)
         itog.append("✓ проверка «Проверь коннекторы» поставлена")
     cl = sek / "CLAUDE.md"
-    t = cl.read_text(encoding="utf-8")
-    if "proverka.py" not in t:
+    t = pravki.chitat(cl)
+    if t is None:
+        itog.append("! CLAUDE.md не в кодировке UTF-8 — фраза «Проверь коннекторы» в него не добавлена "
+                    "(сохраните файл в UTF-8 и повторите обновление)")
+    elif "proverka.py" not in t:
         kopiya(cl, rezerv)
         t = t.replace("## Команды\n", "## Команды\n" + STROKA_PROVERKI + "\n", 1) if "## Команды\n" in t \
             else t.rstrip("\n") + "\n\n## Команды\n" + STROKA_PROVERKI + "\n"
-        cl.write_text(t, encoding="utf-8")
+        pravki.pisat(cl, t)
         itog.append("✓ CLAUDE.md: фраза «Проверь коннекторы»")
     (sek / "NASTROYKI").mkdir(exist_ok=True)
-    (sek / "NASTROYKI" / "versiya-konnektorov.txt").write_text(VERSIYA + "\n", encoding="utf-8")
+    pravki.pisat(sek / "NASTROYKI" / "versiya-konnektorov.txt", VERSIYA + "\n")
     return mcp_izmenen
 
 
@@ -148,8 +157,8 @@ def pravila_sprashivat(itog):
     """Общие настройки Claude этого пользователя: перед каждой отправкой — вопрос «Разрешить?»."""
     f = Path.home() / ".claude" / "settings.json"
     try:
-        nastr = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
-    except ValueError:
+        nastr = json.loads(f.read_text(encoding="utf-8-sig")) if f.exists() else {}
+    except (ValueError, UnicodeDecodeError):
         itog.append(f"! {f} не читается — правило «спрашивать перед отправкой» не добавлено")
         return False
     ask = nastr.setdefault("permissions", {}).setdefault("ask", [])
@@ -160,7 +169,7 @@ def pravila_sprashivat(itog):
         shutil.copy2(f, f.with_name(f"settings.do-obnovleniya-{METKA}.json"))
     ask += novye
     f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps(nastr, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    pravki.pisat(f, json.dumps(nastr, ensure_ascii=False, indent=2) + "\n")
     itog.append("✓ Claude спрашивает «Разрешить?» перед каждой отправкой (WhatsApp, Telegram, почта) — в любом режиме")
     return True
 
@@ -169,6 +178,7 @@ def biblioteki(papka, itog):
     req = papka / "SKRIPTY" / "requirements.txt"
     if not req.exists() or os.environ.get("OBNOVIT_BEZ_PIP"):  # OBNOVIT_BEZ_PIP — для автотестов
         return
+    print(f"  Ставлю библиотеки для {papka.name} (до нескольких минут)…", flush=True)
     komanda = [sys.executable, "-m", "pip", "install", "-q", "--disable-pip-version-check", "-r", str(req)]
     r = subprocess.run(komanda, capture_output=True, text=True, encoding="utf-8", errors="replace", **BEZ_OKNA)
     if r.returncode != 0 and "externally-managed" in (r.stderr + r.stdout):
@@ -184,7 +194,9 @@ def svodka(itog):
     stroki = []
     if est("✓ почта:"):
         stroki.append("✓ Почта: установлена — подключайте любые ящики фразой «Подключи почту»")
-    if est("✓ wa.py", "✓ mcp_", "✓ wa_ustanovka"):
+    if est("! wa.py"):
+        stroki.append("! WhatsApp: часть исправлений не применена — файл wa.py другой версии (подробности в журнале)")
+    elif est("✓ wa.py", "✓ mcp_", "✓ wa_ustanovka"):
         stroki.append("✓ WhatsApp и Telegram: исправлены ошибки Windows (список чатов, чёрное окно)")
     if est("✓ WhatsApp в Claude: обновлён"):
         stroki.append("✓ «WhatsApp в Claude»: обновлён")
@@ -192,7 +204,7 @@ def svodka(itog):
         stroki.append("✓ Отправка: Claude всегда спрашивает «Разрешить?» — в любом режиме, и в «Авто» тоже")
     if est("✓ проверка", "✓ CLAUDE.md: фраза"):
         stroki.append("✓ Новая фраза «Проверь коннекторы» — один отчёт по всем каналам")
-    stroki += [s for s in itog if s.startswith("!")]
+    stroki += [s for s in itog if s.startswith("!") and not s.startswith("! wa.py")]
     return stroki or ["· Всё уже свежее — менять нечего"]
 
 
@@ -214,13 +226,16 @@ def main():
     if wa:
         perezapusk |= obnovit_wa_claude(wa, itog)
     perezapusk |= pravila_sprashivat(itog)
+    print("\n".join("  " + s for s in svodka(itog)), flush=True)
     for p in (sek, wa):
         if p:
             biblioteki(p, itog)
     # подробный список — в журнал для организатора, человеку — короткий итог простыми словами
     zhurnal = (sek / "NASTROYKI" if sek else wa) / f"obnovlenie-{METKA}.log"
-    zhurnal.write_text("\n".join(itog) + "\n", encoding="utf-8")
-    print("\n".join("  " + s for s in svodka(itog)))
+    pravki.pisat(zhurnal, "\n".join(itog) + "\n")
+    for s in itog:
+        if s.startswith("! библиотеки"):
+            print("  " + s, flush=True)
     print(f"  (подробно для организатора: {zhurnal})", flush=True)
     if sek:
         print(flush=True)

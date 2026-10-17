@@ -34,6 +34,15 @@ import golos
 
 BIN = ROOT / "SKRIPTY" / "bin" / ("wacli.exe" if os.name == "nt" else "wacli")
 STORE = NASTROYKI / "wacli"
+# «WhatsApp в Claude» уже стоит в домашней папке — берём его вход и переписку, второй раз в WhatsApp не входим
+_WA_CLAUDE = Path.home() / "WhatsApp-Claude"
+_CHUZHOY_STORE = _WA_CLAUDE / "NASTROYKI" / "wacli"
+CHUZHOY_VKHOD = (not STORE.exists() and ROOT.resolve() != _WA_CLAUDE.resolve()
+                 and _CHUZHOY_STORE.is_dir() and any(_CHUZHOY_STORE.iterdir()))
+if CHUZHOY_VKHOD:
+    STORE = _CHUZHOY_STORE
+    if not BIN.exists():
+        BIN = _WA_CLAUDE / "SKRIPTY" / "bin" / BIN.name
 KARTA = NASTROYKI / "whatsapp-chaty.json"      # название чата → адрес (JID)
 ISKLYUCHIT = NASTROYKI / "chaty-isklyuchit.txt"  # личные чаты: не хранить на компьютере совсем
 INTERVAL_MIN = 10                               # как часто служба подтягивает переписку
@@ -122,6 +131,9 @@ def vremya_iz(z):
 # ---------- вход ----------
 def vhod_po_nomeru(nomer):
     """Вход без QR: WhatsApp покажет поле для 8-значного кода, который печатает wacli."""
+    if CHUZHOY_VKHOD and (wacli("auth", "status", check=False) or {}).get("authenticated"):
+        print("Вход в WhatsApp уже есть — из «WhatsApp в Claude». Второй раз входить не нужно.")
+        return
     STORE.mkdir(parents=True, exist_ok=True)
     nomer = re.sub(r"[^\d]", "", nomer)
     print("На телефоне: WhatsApp → Настройки → Связанные устройства → Привязка устройства →")
@@ -141,6 +153,9 @@ def vhod_po_nomeru(nomer):
 
 
 def vhod():
+    if CHUZHOY_VKHOD and (wacli("auth", "status", check=False) or {}).get("authenticated"):
+        print("Вход в WhatsApp уже есть — из «WhatsApp в Claude». Второй раз входить не нужно.")
+        return
     STORE.mkdir(parents=True, exist_ok=True)
     print("Возьмите телефон: WhatsApp → Настройки → Связанные устройства → Привязка устройства.")
     print("Сейчас откроется картинка с QR — наведите камеру. Код обновляется сам.", flush=True)
@@ -283,7 +298,10 @@ def zdorove():
     import wa_ustanovka
     d = wacli("doctor", check=False) or {}
     st = d.get("store") or {}
-    print(f"Программа wacli: {wa_ustanovka.ustanovlennaya() or 'не установлена'}")
+    if CHUZHOY_VKHOD:
+        print("Вход, программа wacli и переписка: из «WhatsApp в Claude» (~/WhatsApp-Claude), общие с секретарём")
+    else:
+        print(f"Программа wacli: {wa_ustanovka.ustanovlennaya() or 'не установлена'}")
     if d.get("session_revoked"):
         print("Вход в WhatsApp: ОТВЯЗАН (телефон был офлайн ~14 дней или устройство удалили). Нужно: python wa.py vhod")
     else:
@@ -311,6 +329,10 @@ def sluzhba_komanda():
 
 
 def sluzhba(deystvie):
+    if CHUZHOY_VKHOD:
+        print("Служба: общая с «WhatsApp в Claude» (~/WhatsApp-Claude)" if deystvie == "--status"
+              else "Вход и служба уже есть в «WhatsApp в Claude» — вторая служба не нужна.")
+        return
     STORE.mkdir(parents=True, exist_ok=True)
     log = STORE / "sluzhba.log"
     if sys.platform == "darwin":

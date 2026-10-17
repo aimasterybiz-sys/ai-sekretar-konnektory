@@ -27,7 +27,8 @@ NOVYE = ["SKRIPTY/pochta.py", "SKRIPTY/pochta_servery.py", "SKRIPTY/pochta_dostu
 BIBLIOTEKI = ["certifi", "keyring>=25", "msal>=1.31", "msal-extensions>=1.2"]
 IGNOR = ["NASTROYKI/pochta.json", "NASTROYKI/pochta-kontakty.json", "NASTROYKI/ms-token.bin",
          "NASTROYKI/ms-token.bin.lockfile"]
-PRAVILO = "Bash(*pochta.py otpravit*)"
+# На Windows Claude Code работает в PowerShell, и правила для Bash его не касаются — поэтому оба
+PRAVILA = ["Bash(*pochta.py otpravit*)", "PowerShell(*pochta.py otpravit*)"]
 
 POCHTA_V_PUBLIKATSII = """
 ## Почта
@@ -154,13 +155,17 @@ def ustanovit(sek):
         f = sek / otn
         if not f.exists() and otn.endswith("skill-publikatsiya/SKILL.md"):
             f.parent.mkdir(parents=True, exist_ok=True)
-            f.write_text(PUBLIKATSIYA_TOLKO_POCHTA, encoding="utf-8")
+            f.write_text(PUBLIKATSIYA_TOLKO_POCHTA, encoding="utf-8", newline="\n")
             itog.append(f"✓ {otn} (новый: отправка писем)")
             continue
         if not f.exists():
             itog.append(f"· {otn}: файла нет — пропускаю")
             continue
-        t = f.read_text(encoding="utf-8")
+        try:
+            t = f.read_text(encoding="utf-8-sig")
+        except UnicodeDecodeError:
+            itog.append(f"! {otn}: файл не в кодировке UTF-8 — не тронут (сохраните его в UTF-8 и повторите)")
+            continue
         if UZHE[otn] in t:
             continue
         novyy, nashel, ne_nashel = t, 0, 0
@@ -177,7 +182,7 @@ def ustanovit(sek):
             novyy = novyy.rstrip("\n") + "\n" + dopisat
         if novyy != t:
             sokhranit_kopiyu(otn)
-            f.write_text(novyy, encoding="utf-8")
+            f.write_text(novyy, encoding="utf-8", newline="\n")
         if UZHE[otn] in novyy:
             itog.append(f"✓ {otn}" + (f" (часть правок не понадобилась: {ne_nashel})" if ne_nashel else ""))
         else:
@@ -187,12 +192,12 @@ def ustanovit(sek):
 
     # 3. библиотеки
     req = sek / "SKRIPTY" / "requirements.txt"
-    est = req.read_text(encoding="utf-8").splitlines() if req.exists() else []
+    est = req.read_text(encoding="utf-8-sig", errors="replace").splitlines() if req.exists() else []
     imena = {s.split(">")[0].split("=")[0].split("[")[0].strip().lower() for s in est if s.strip()}
     nedostayet = [b for b in BIBLIOTEKI if b.split(">")[0].lower() not in imena]
     if nedostayet:
         sokhranit_kopiyu("SKRIPTY/requirements.txt")
-        req.write_text("\n".join([s for s in est if s.strip()] + nedostayet) + "\n", encoding="utf-8")
+        req.write_text("\n".join([s for s in est if s.strip()] + nedostayet) + "\n", encoding="utf-8", newline="\n")
         itog.append("✓ SKRIPTY/requirements.txt: + " + ", ".join(nedostayet))
 
     # 4. старый сборщик одного ящика больше не нужен
@@ -204,27 +209,28 @@ def ustanovit(sek):
 
     # 5. личные файлы почты — не для отправки и не для git
     gi = sek / ".gitignore"
-    t = gi.read_text(encoding="utf-8") if gi.exists() else ""
+    t = gi.read_text(encoding="utf-8-sig", errors="replace") if gi.exists() else ""
     dop = [s for s in IGNOR if s not in t.splitlines()]
     if dop:
-        gi.write_text(t.rstrip("\n") + ("\n" if t else "") + "\n".join(dop) + "\n", encoding="utf-8")
+        gi.write_text(t.rstrip("\n") + ("\n" if t else "") + "\n".join(dop) + "\n", encoding="utf-8", newline="\n")
 
     # 6. Claude спрашивает человека перед каждой отправкой письма
     sf = sek / ".claude" / "settings.json"
     nastr = {}
     if sf.exists():
         try:
-            nastr = json.loads(sf.read_text(encoding="utf-8"))
-        except ValueError:
+            nastr = json.loads(sf.read_text(encoding="utf-8-sig"))
+        except (ValueError, UnicodeDecodeError):
             itog.append("! .claude/settings.json не читается — правило «спрашивать перед отправкой» не добавлено")
             nastr = None
     if nastr is not None:
         ask = nastr.setdefault("permissions", {}).setdefault("ask", [])
-        if PRAVILO not in ask:
+        novye = [p for p in PRAVILA if p not in ask]
+        if novye:
             sokhranit_kopiyu(".claude/settings.json")
-            ask.append(PRAVILO)
+            ask += novye
             sf.parent.mkdir(parents=True, exist_ok=True)
-            sf.write_text(json.dumps(nastr, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            sf.write_text(json.dumps(nastr, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
             itog.append("✓ .claude/settings.json: Claude спрашивает разрешение перед каждой отправкой письма")
 
     return itog, (rezerv if rezerv.exists() else None)

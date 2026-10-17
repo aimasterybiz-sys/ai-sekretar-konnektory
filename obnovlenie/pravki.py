@@ -20,6 +20,23 @@ VSEGDA_SPRASHIVAT = ('# Отправка всегда ждёт кнопку «Р
 PISAT = ("PISAT = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, "
          "openWorldHint=True)\n")
 
+CHUZHOY_VKHOD = '''STORE = NASTROYKI / "wacli"
+# «WhatsApp в Claude» уже стоит в домашней папке — берём его вход и переписку, второй раз в WhatsApp не входим
+_WA_CLAUDE = Path.home() / "WhatsApp-Claude"
+_CHUZHOY_STORE = _WA_CLAUDE / "NASTROYKI" / "wacli"
+CHUZHOY_VKHOD = (not STORE.exists() and ROOT.resolve() != _WA_CLAUDE.resolve()
+                 and _CHUZHOY_STORE.is_dir() and any(_CHUZHOY_STORE.iterdir()))
+if CHUZHOY_VKHOD:
+    STORE = _CHUZHOY_STORE
+    if not BIN.exists():
+        BIN = _WA_CLAUDE / "SKRIPTY" / "bin" / BIN.name
+'''
+
+UZHE_VOSHLI = '''    if CHUZHOY_VKHOD and (wacli("auth", "status", check=False) or {}).get("authenticated"):
+        print("Вход в WhatsApp уже есть — из «WhatsApp в Claude». Второй раз входить не нужно.")
+        return
+'''
+
 # имя файла → [(признак, [(было, стало), …]), …]
 PRAVKI = {
     "wa.py": [
@@ -43,6 +60,30 @@ PRAVKI = {
              'BEZ_OKNA = {"creationflags": 0x08000000} if os.name == "nt" else {}\n'),
             ('errors="replace", timeout=timeout)', 'errors="replace", timeout=timeout, **BEZ_OKNA)'),
             ('errors="replace", timeout=600)', 'errors="replace", timeout=600, **BEZ_OKNA)'),
+        ]),
+        # секретарь пользуется входом «WhatsApp в Claude», если свой вход не делали
+        ("CHUZHOY_VKHOD", [
+            ('STORE = NASTROYKI / "wacli"\n', CHUZHOY_VKHOD),
+            ('def vhod_po_nomeru(nomer):\n'
+             '    """Вход без QR: WhatsApp покажет поле для 8-значного кода, который печатает wacli."""\n'
+             '    STORE.mkdir(parents=True, exist_ok=True)\n',
+             'def vhod_po_nomeru(nomer):\n'
+             '    """Вход без QR: WhatsApp покажет поле для 8-значного кода, который печатает wacli."""\n'
+             + UZHE_VOSHLI + '    STORE.mkdir(parents=True, exist_ok=True)\n'),
+            ('def vhod():\n    STORE.mkdir(parents=True, exist_ok=True)\n',
+             'def vhod():\n' + UZHE_VOSHLI + '    STORE.mkdir(parents=True, exist_ok=True)\n'),
+            ('def sluzhba(deystvie):\n    STORE.mkdir(parents=True, exist_ok=True)\n',
+             'def sluzhba(deystvie):\n'
+             '    if CHUZHOY_VKHOD:\n'
+             '        print("Служба: общая с «WhatsApp в Claude» (~/WhatsApp-Claude)" if deystvie == "--status"\n'
+             '              else "Вход и служба уже есть в «WhatsApp в Claude» — вторая служба не нужна.")\n'
+             '        return\n'
+             '    STORE.mkdir(parents=True, exist_ok=True)\n'),
+            ('''    print(f"Программа wacli: {wa_ustanovka.ustanovlennaya() or 'не установлена'}")\n''',
+             '''    if CHUZHOY_VKHOD:\n'''
+             '''        print("Вход, программа wacli и переписка: из «WhatsApp в Claude» (~/WhatsApp-Claude), общие с секретарём")\n'''
+             '''    else:\n'''
+             '''        print(f"Программа wacli: {wa_ustanovka.ustanovlennaya() or 'не установлена'}")\n'''),
         ]),
     ],
     "mcp_whatsapp.py": [
@@ -70,13 +111,28 @@ PRAVKI = {
 }
 
 
+def chitat(fayl):
+    """Текст файла в UTF-8 (и с BOM от Блокнота). Файл в другой кодировке — None: его не трогаем."""
+    try:
+        return Path(fayl).read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError:
+        return None
+
+
+def pisat(fayl, tekst):
+    """Записать в UTF-8 с переводами строк как в Unix — на Windows иначе файлы получают CRLF."""
+    Path(fayl).write_text(tekst, encoding="utf-8", newline="\n")
+
+
 def primenit(fayl):
     """Применить правки к файлу. Возвращает список строк-итогов (пустой — менять было нечего)."""
     fayl = Path(fayl)
     gruppy = PRAVKI.get(fayl.name)
     if not gruppy or not fayl.exists():
         return []
-    tekst = fayl.read_text(encoding="utf-8")
+    tekst = chitat(fayl)
+    if tekst is None:
+        return [f"! {fayl.name}: файл не в кодировке UTF-8 — не тронут (сохраните его в UTF-8 и повторите)"]
     novyy, itog = tekst, []
     for priznak, zameny in gruppy:
         if priznak in novyy:
@@ -88,5 +144,5 @@ def primenit(fayl):
         else:
             itog.append(f"! {fayl.name}: другая версия файла — исправление «{priznak.strip()}» не применено")
     if novyy != tekst:
-        fayl.write_text(novyy, encoding="utf-8")
+        pisat(fayl, novyy)
     return itog
