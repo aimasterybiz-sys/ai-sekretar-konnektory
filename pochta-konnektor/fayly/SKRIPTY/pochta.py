@@ -453,9 +453,9 @@ def otpravit(argv):
             sm.quit()
         except Exception:
             pass
+    kratko = re.sub(r"\s+", " ", tekst)[:150]
     with open(ZHURNAL_OTPRAVKI, "a", encoding="utf-8") as f:
-        f.write(f"{datetime.now():%Y-%m-%d %H:%M} · почта · {y['adres']} → {komu} · {tema[:100]} · "
-                f"{re.sub(r'\s+', ' ', tekst)[:150]}\n")
+        f.write(f"{datetime.now():%Y-%m-%d %H:%M} · почта · {y['adres']} → {komu} · {tema[:100]} · {kratko}\n")
     if fayl:
         try:
             p.unlink()  # чтобы этот же текст случайно не ушёл второй раз

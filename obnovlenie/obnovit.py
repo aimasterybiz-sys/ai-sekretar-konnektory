@@ -38,7 +38,7 @@ PRAVILA_SPRASHIVAT = ["mcp__whatsapp__whatsapp_otpravit", "mcp__messendzhery__wh
 STROKA_PROVERKI = ("- «Проверь коннекторы» — запусти `python SKRIPTY/proverka.py` (на Mac `python3`) и покажи отчёт "
                    "как есть, ничего не сокращая.")
 BEZ_OKNA = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
-PROPUSK = ("_архив", "_do-", "/.Trash", "\\$Recycle", "Library", "AppData", "node_modules", "/.")
+PROPUSK = {"Library", "AppData", "node_modules", "$Recycle.Bin", "Windows"}  # системные папки — не искать
 
 
 def eto_sekretar(p):
@@ -54,10 +54,11 @@ def nayti_sekretarya(yavno):
     kandidaty = []
     doma = Path.home()
     for koren, papki, _ in os.walk(doma):
-        glubina = Path(koren).relative_to(doma).parts
-        if len(glubina) >= 4 or any(s in koren for s in PROPUSK):
+        chasti = Path(koren).relative_to(doma).parts
+        if len(chasti) >= 4:
             papki[:] = []
             continue
+        papki[:] = [p for p in papki if p not in PROPUSK and not p.startswith((".", "_архив", "_do-"))]
         for imya in papki:
             if imya == "02_sekretar" and eto_sekretar(Path(koren) / imya):
                 kandidaty.append(Path(koren) / imya)
@@ -223,7 +224,7 @@ def main():
     print(f"  (подробно для организатора: {zhurnal})", flush=True)
     if sek:
         print(flush=True)
-        subprocess.run([sys.executable, str(sek / "SKRIPTY" / "proverka.py")], **BEZ_OKNA)
+        subprocess.run([sys.executable, str(sek / "SKRIPTY" / "proverka.py")])
     print("\nГОТОВО. " + ("Полностью закройте Claude и откройте снова — тогда обновление заработает "
                           "(Windows: правой кнопкой по значку Claude возле часов → «Выйти»; Mac: Cmd + Q)."
                           if perezapusk else "Откройте новый чат — в нём обновление уже работает."))

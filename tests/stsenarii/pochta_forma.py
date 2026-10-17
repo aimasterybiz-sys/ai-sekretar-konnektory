@@ -25,12 +25,25 @@ dost.imap_vkhod = _ne_pustil
 pf.PROSTOY = 60
 otkryto = []
 webbrowser.open = lambda url: otkryto.append(url) or True
-potok = threading.Thread(target=pf.zapustit, daemon=True)
+oshibka = []
+
+
+def zapusk():
+    try:
+        pf.zapustit()
+    except BaseException:  # показать причину, если страница не поднялась
+        import traceback
+        oshibka.append(traceback.format_exc())
+
+
+potok = threading.Thread(target=zapusk, daemon=True)
 potok.start()
-for _ in range(50):
-    if otkryto:
+for _ in range(300):
+    if otkryto or oshibka:
         break
     time.sleep(0.1)
+if not otkryto:
+    sys.exit("Страница не поднялась за 30 секунд:\n" + "".join(oshibka))
 url = otkryto[0]
 baza, token = url.split("/?t=")
 port = baza.rsplit(":", 1)[1]
