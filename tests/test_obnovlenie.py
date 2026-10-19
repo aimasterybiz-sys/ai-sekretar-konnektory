@@ -1,14 +1,15 @@
 """Одно обновление «Обнови коннекторы секретаря» — как у ученика на Windows и Mac."""
 import json
+from pathlib import Path
+
+import pytest
 import py_compile
 
 from conftest import KOREN, sekretar, zapustit
 
 OBNOVIT = KOREN / "obnovlenie" / "obnovit.py"
 PRAVILA = {"mcp__whatsapp__whatsapp_otpravit", "mcp__messendzhery__whatsapp_otpravit",
-           "mcp__messendzhery__telegram_otpravit"} | {
-    f"{sh}(*{sk} otpravit*)" if sk != "tg_otpravit.py" else f"{sh}(*tg_otpravit.py*)"
-    for sh in ("Bash", "PowerShell") for sk in ("pochta.py", "wa.py", "tg_otpravit.py")}
+           "mcp__messendzhery__telegram_otpravit", "Bash(*otpravit*)", "PowerShell(*otpravit*)"}
 
 
 def tekst(f):
@@ -113,15 +114,30 @@ def test_fayl_ne_v_utf8_ne_lomaet_obnovlenie(dom):
     assert PRAVILA <= set(json.loads(tekst(dom / ".claude" / "settings.json"))["permissions"]["ask"])
 
 
-def test_chuzhaya_versiya_wa_py_ne_vydaetsya_za_ispravlennuyu(dom):
+def test_ruchnaya_pravka_wa_py_zamenyaetsya_svezhim(dom):
+    """Как у Насти: wa.py правили руками не байт в байт — обновление ставит свежий файл целиком, без круга."""
     sek = sekretar(dom)
     f = sek / "SKRIPTY" / "wa.py"
-    f.write_text(tekst(f).replace('QR = NASTROYKI / "qr-whatsapp.png"\n', 'QR = NASTROYKI / "qr.png"\n'), encoding="utf-8")
+    f.write_text(tekst(f).replace('QR = NASTROYKI / "qr-whatsapp.png"\n', 'QR = NASTROYKI / "qr.png"  # моя правка\n'),
+                 encoding="utf-8")
     kod, vyvod = zapustit(OBNOVIT, home=dom, cwd=sek)
     assert kod == 0, vyvod
-    assert "! WhatsApp: часть исправлений не применена" in vyvod
-    assert "чёрное окно" not in vyvod
-    assert "BEZ_OKNA" not in tekst(f) and "t.year < 1971" in tekst(f)  # что можно — исправлено, остальное честно нет
+    assert "часть исправлений не применена" not in vyvod and "исправлены ошибки Windows" in vyvod
+    t = tekst(f)
+    assert "BEZ_OKNA" in t and "CHUZHOY_VKHOD" in t and '"com.sekretar.wacli"' in t and '"SekretarWA"' in t
+    assert "моя правка" in (next(sek.glob("_do-obnovleniya-*")) / "wa.py").read_text(encoding="utf-8")
+    kod, vyvod = zapustit(OBNOVIT, home=dom, cwd=sek)
+    assert "Всё уже свежее" in vyvod or "Откройте новый чат" in vyvod
+
+
+def test_slomannyy_wa_py_tozhe_zamenyaetsya(dom):
+    sek = sekretar(dom)
+    f = sek / "SKRIPTY" / "wa.py"
+    f.write_text(tekst(f).replace("def vremya_iz(z):\n", "def vremya_iz(z):\n  x = 1\n", 1), encoding="utf-8")
+    kod, vyvod = zapustit(OBNOVIT, home=dom, cwd=sek)
+    assert kod == 0, vyvod
+    compile(tekst(f), str(f), "exec")
+    assert "t.year < 1971" in tekst(f)
 
 
 def test_proverka_vidit_staruyu_versiyu_i_novuyu(dom):
@@ -135,3 +151,60 @@ def test_proverka_vidit_staruyu_versiyu_i_novuyu(dom):
     kod, vyvod = zapustit(sek / "SKRIPTY" / "proverka.py", home=dom, cwd=sek)
     assert kod == 0, vyvod
     assert "старой версии" not in vyvod and "✓ Перед каждой отправкой Claude спрашивает" in vyvod
+
+
+def test_novyy_fayl_v_whatsapp_claude_ne_valit_obnovlenie(dom):
+    """У ученика нет файла, который есть в свежем «WhatsApp в Claude» (так будет при следующем выпуске)."""
+    (dom / "WhatsApp-Claude" / "SKRIPTY" / "golos.py").unlink()
+    kod, vyvod = zapustit(OBNOVIT, home=dom, cwd=sekretar(dom))
+    assert kod == 0, vyvod
+    assert (dom / "WhatsApp-Claude" / "SKRIPTY" / "golos.py").exists() and "ГОТОВО" in vyvod
+
+
+def test_strannye_nastroyki_claude_ne_valyat_obnovlenie(dom):
+    (dom / ".claude").mkdir()
+    (dom / ".claude" / "settings.json").write_text('{"permissions": {"ask": "Bash(rm *)"}}', encoding="utf-8")
+    kod, vyvod = zapustit(OBNOVIT, home=dom, cwd=sekretar(dom))
+    assert kod == 0, vyvod
+    assert "устроен неожиданно" in vyvod and "ГОТОВО" in vyvod
+    assert tekst(dom / ".claude" / "settings.json") == '{"permissions": {"ask": "Bash(rm *)"}}'
+
+
+def test_sbor_vidit_whatsapp_iz_whatsapp_claude(dom):
+    zapustit(OBNOVIT, home=dom, cwd=sekretar(dom))
+    s = tekst(sekretar(dom) / "SKRIPTY" / "sbor.py")
+    assert '"WhatsApp-Claude"' in s and 'zapustit("pochta.py")' in s
+    compile(s, "sbor.py", "exec")
+
+
+def test_iz_vremennoy_papki_s_putem(dom, tmp_path):
+    """Claude запускает обновление из временной папки и передаёт путь к секретарю — всё находится."""
+    vremennaya = tmp_path / "temp"
+    vremennaya.mkdir()
+    kod, vyvod = zapustit(OBNOVIT, sekretar(dom), home=dom, cwd=vremennaya)
+    assert kod == 0, vyvod
+    assert (sekretar(dom) / "SKRIPTY" / "pochta.py").exists()
+
+
+def test_sekretar_ne_nayden_no_whatsapp_est_chestno_skazano(dom, tmp_path):
+    import shutil
+    glubzhe = dom / "OneDrive" / "Документы" / "Курс" / "AI SYSTEM"
+    glubzhe.mkdir(parents=True)
+    shutil.move(str(sekretar(dom)), str(glubzhe / "02_sekretar"))
+    vremennaya = tmp_path / "temp"
+    vremennaya.mkdir()
+    kod, vyvod = zapustit(OBNOVIT, home=dom, cwd=vremennaya)
+    assert kod == 0, vyvod
+    assert "Папку секретаря не нашёл" in vyvod and "python obnovit.py" in vyvod
+
+
+def test_staryy_python_ponyatnoe_soobshchenie():
+    import shutil, subprocess
+    staryy = shutil.which("python3.9") or ("/usr/bin/python3" if Path("/usr/bin/python3").exists() else None)
+    if not staryy:
+        pytest.skip("нет Python 3.9 на этой машине")
+    v = subprocess.run([staryy, "-c", "import sys; print(sys.version_info[:2] < (3, 10))"], capture_output=True, text=True)
+    if v.stdout.strip() != "True":
+        pytest.skip("системный python3 не старый")
+    r = subprocess.run([staryy, str(OBNOVIT)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode != 0 and "слишком старый" in r.stderr and "Traceback" not in r.stderr

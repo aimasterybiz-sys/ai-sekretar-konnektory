@@ -20,9 +20,7 @@ ZDES = Path(__file__).resolve().parent
 SEK = ZDES.parent if (ZDES.parent / "CLAUDE.md").exists() else None
 WA_CLAUDE = Path.home() / "WhatsApp-Claude"
 PRAVILA_SPRASHIVAT = ["mcp__whatsapp__whatsapp_otpravit", "mcp__messendzhery__whatsapp_otpravit",
-                      "mcp__messendzhery__telegram_otpravit"] + [
-    f"{shell}(*{skript} otpravit*)" if skript != "tg_otpravit.py" else f"{shell}(*tg_otpravit.py*)"
-    for shell in ("Bash", "PowerShell") for skript in ("pochta.py", "wa.py", "tg_otpravit.py")]
+                      "mcp__messendzhery__telegram_otpravit", "Bash(*otpravit*)", "PowerShell(*otpravit*)"]
 BEZ_OKNA = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
 
 
@@ -94,7 +92,7 @@ def main():
     razdel("Защита отправки")
     nastroyki = Path.home() / ".claude" / "settings.json"
     try:
-        ask = json.loads(nastroyki.read_text(encoding="utf-8")).get("permissions", {}).get("ask", [])
+        ask = json.loads(nastroyki.read_text(encoding="utf-8-sig")).get("permissions", {}).get("ask", [])
     except Exception:
         ask = []
     net = [p for p in PRAVILA_SPRASHIVAT if p not in ask]

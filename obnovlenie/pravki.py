@@ -86,6 +86,15 @@ PRAVKI = {
              '''        print(f"Программа wacli: {wa_ustanovka.ustanovlennaya() or 'не установлена'}")\n'''),
         ]),
     ],
+    "sbor.py": [
+        # общий сбор видит программу WhatsApp и в «WhatsApp в Claude», а не только в папке секретаря
+        ("WhatsApp-Claude", [
+            ('        est_wacli = (ZDES / "bin" / ("wacli.exe" if os.name == "nt" else "wacli")).exists()\n',
+             '        imya_wacli = "wacli.exe" if os.name == "nt" else "wacli"\n'
+             '        est_wacli = ((ZDES / "bin" / imya_wacli).exists()\n'
+             '                     or (Path.home() / "WhatsApp-Claude" / "SKRIPTY" / "bin" / imya_wacli).exists())\n'),
+        ]),
+    ],
     "mcp_whatsapp.py": [
         ("VSEGDA_SPRASHIVAT", [
             (PISAT, PISAT + VSEGDA_SPRASHIVAT),
@@ -112,16 +121,20 @@ PRAVKI = {
 
 
 def chitat(fayl):
-    """Текст файла в UTF-8 (и с BOM от Блокнота). Файл в другой кодировке — None: его не трогаем."""
+    """Текст файла в UTF-8 (и с BOM от Блокнота). Файла нет или он в другой кодировке — None: его не трогаем."""
+    fayl = Path(fayl)
+    if not fayl.is_file():
+        return None
     try:
-        return Path(fayl).read_text(encoding="utf-8-sig")
+        return fayl.read_text(encoding="utf-8-sig")
     except UnicodeDecodeError:
         return None
 
 
 def pisat(fayl, tekst):
     """Записать в UTF-8 с переводами строк как в Unix — на Windows иначе файлы получают CRLF."""
-    Path(fayl).write_text(tekst, encoding="utf-8", newline="\n")
+    with open(fayl, "w", encoding="utf-8", newline="\n") as f:
+        f.write(tekst)
 
 
 def primenit(fayl):

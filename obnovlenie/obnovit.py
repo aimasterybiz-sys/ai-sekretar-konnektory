@@ -24,6 +24,10 @@ for _s in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
+if sys.version_info < (3, 10):
+    sys.exit(f"Этот Python слишком старый ({sys.version.split()[0]}), нужен 3.10 или новее. "
+             "Скажите Claude: «Поставь Python 3.13 с python.org и запусти обновление им».")
+
 ZDES = Path(__file__).resolve().parent
 # в скачанном архиве коннекторы лежат рядом с obnovit.py, в репозитории — уровнем выше
 BAZA = ZDES if (ZDES / "pochta-konnektor").exists() else ZDES.parent
@@ -32,11 +36,11 @@ import pravki  # noqa: E402
 
 VERSIYA = (BAZA / "VERSIYA").read_text(encoding="utf-8").strip() if (BAZA / "VERSIYA").exists() else "?"
 METKA = datetime.now().strftime("%Y-%m-%d-%H%M%S")
-# На Windows Claude Code работает в PowerShell, и правила для Bash его не касаются — поэтому оба набора
+# На Windows Claude Code работает в PowerShell, и правила для Bash его не касаются — поэтому оба.
+# «*otpravit*» ловит любую отправку скриптом (wa.py otpravit, tg_otpravit.py, pochta.py otpravit, otpravit_v_chat),
+# даже если путь к скрипту в кавычках или Claude вызывает функцию отправки напрямую
 PRAVILA_SPRASHIVAT = ["mcp__whatsapp__whatsapp_otpravit", "mcp__messendzhery__whatsapp_otpravit",
-                      "mcp__messendzhery__telegram_otpravit"] + [
-    f"{shell}(*{skript} otpravit*)" if skript != "tg_otpravit.py" else f"{shell}(*tg_otpravit.py*)"
-    for shell in ("Bash", "PowerShell") for skript in ("pochta.py", "wa.py", "tg_otpravit.py")]
+                      "mcp__messendzhery__telegram_otpravit", "Bash(*otpravit*)", "PowerShell(*otpravit*)"]
 STROKA_PROVERKI = ("- «Проверь коннекторы» — запусти `python SKRIPTY/proverka.py` (на Mac `python3`) и покажи отчёт "
                    "как есть, ничего не сокращая.")
 BEZ_OKNA = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
@@ -96,8 +100,32 @@ def ispravit(papka, itog, rezerv):
             rezerv.mkdir(parents=True, exist_ok=True)
             if not (rezerv / f.name).exists():
                 (rezerv / f.name).write_bytes(do)
+        ne_rabotaet = not kompiliruetsya(f)
+        if f.name == "wa.py" and (ne_rabotaet or any(s.startswith("! wa.py") for s in stroki)):
+            # ручные правки ученика или другая версия: ставим свежий wa.py целиком, прежний — в резервной папке
+            if not (rezerv / f.name).exists():
+                rezerv.mkdir(parents=True, exist_ok=True)
+                (rezerv / f.name).write_bytes(do)
+            svezhiy = pravki.chitat(BAZA / "whatsapp-claude" / "SKRIPTY" / "wa.py")
+            for bylo, stalo in (('"com.whatsapp-claude.wacli"', '"com.sekretar.wacli"'), ('"WhatsAppClaude"', '"SekretarWA"'),
+                                ("задача WhatsAppClaude", "задача SekretarWA")):
+                svezhiy = svezhiy.replace(bylo, stalo)
+            pravki.pisat(f, svezhiy)
+            stroki = [s for s in stroki if not s.startswith("! wa.py")] + ["✓ wa.py: заменён свежей версией целиком"]
+            pomenyal = True
+        elif ne_rabotaet:
+            f.write_bytes(do)
+            stroki.append(f"! {f.name}: после правок не запускается — вернул как было (пришлите отчёт организатору)")
         itog += stroki
     return pomenyal
+
+
+def kompiliruetsya(f):
+    try:
+        compile(f.read_text(encoding="utf-8-sig"), str(f), "exec")
+        return True
+    except (SyntaxError, ValueError, UnicodeDecodeError):
+        return False
 
 
 def obnovit_sekretarya(sek, itog):
@@ -112,7 +140,7 @@ def obnovit_sekretarya(sek, itog):
     mcp_izmenen = ispravit(sek, itog, rezerv)
     # «Проверь коннекторы»
     istochnik, tsel = ZDES / "proverka.py", sek / "SKRIPTY" / "proverka.py"
-    if pravki.chitat(tsel) != pravki.chitat(istochnik) if tsel.exists() else True:
+    if pravki.chitat(tsel) != pravki.chitat(istochnik):
         kopiya(tsel, rezerv)
         pravki.pisat(tsel, pravki.chitat(istochnik))
         itog.append("✓ проверка «Проверь коннекторы» поставлена")
@@ -170,6 +198,10 @@ def pravila_sprashivat(itog):
     except (ValueError, UnicodeDecodeError):
         itog.append(f"! {f} не читается — правило «спрашивать перед отправкой» не добавлено")
         return False
+    if not isinstance(nastr, dict) or not isinstance(nastr.get("permissions", {}), dict) \
+            or not isinstance(nastr.get("permissions", {}).get("ask", []), list):
+        itog.append(f"! {f} устроен неожиданно — правило «спрашивать перед отправкой» не добавлено")
+        return False
     ask = nastr.setdefault("permissions", {}).setdefault("ask", [])
     novye = [p for p in PRAVILA_SPRASHIVAT if p not in ask]
     if not novye:
@@ -189,10 +221,16 @@ def biblioteki(papka, itog):
         return
     print(f"  Ставлю библиотеки для {papka.name} (до нескольких минут)…", flush=True)
     komanda = [sys.executable, "-m", "pip", "install", "-q", "--disable-pip-version-check", "-r", str(req)]
-    r = subprocess.run(komanda, capture_output=True, text=True, encoding="utf-8", errors="replace", **BEZ_OKNA)
-    if r.returncode != 0 and "externally-managed" in (r.stderr + r.stdout):
-        r = subprocess.run(komanda + ["--user"], capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", **BEZ_OKNA)
+    try:
+        r = subprocess.run(komanda, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=420, **BEZ_OKNA)
+        if r.returncode != 0 and "externally-managed" in (r.stderr + r.stdout):
+            r = subprocess.run(komanda + ["--user"], capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=420, **BEZ_OKNA)
+    except subprocess.TimeoutExpired:
+        itog.append(f"! библиотеки для {papka.name} не успели поставиться за 7 минут (медленная сеть) — "
+                    "повторите фразу обновления позже, остальное уже на месте")
+        return
     if r.returncode != 0:
         itog.append(f"! библиотеки для {papka.name} не поставились: {(r.stderr or r.stdout).strip()[-300:]}")
 
@@ -202,18 +240,21 @@ def svodka(itog):
     est = lambda *nachala: any(s.startswith(nachala) for s in itog)  # noqa: E731
     stroki = []
     if est("✓ почта:"):
-        stroki.append("✓ Почта: установлена — подключайте любые ящики фразой «Подключи почту»")
+        stroki.append("✓ Почта: установлена — подключайте ящики фразой «Подключи почту» "
+                      "(Gmail, iCloud, ukr.net, свой домен; Outlook и Microsoft 365 — позже)")
     if est("! wa.py"):
         stroki.append("! WhatsApp: часть исправлений не применена — файл wa.py другой версии (подробности в журнале)")
-    elif est("✓ wa.py", "✓ mcp_", "✓ wa_ustanovka"):
+    elif est("✓ wa.py", "✓ mcp_", "✓ wa_ustanovka", "✓ sbor.py"):
         stroki.append("✓ WhatsApp и Telegram: исправлены ошибки Windows (список чатов, чёрное окно)")
     if est("✓ WhatsApp в Claude: обновлён"):
         stroki.append("✓ «WhatsApp в Claude»: обновлён")
-    if est("✓ Claude спрашивает", "✓ почта: .claude/settings.json") or est("✓ mcp_messendzhery", "✓ mcp_whatsapp"):
-        stroki.append("✓ Отправка: Claude всегда спрашивает «Разрешить?» — в любом режиме, и в «Авто» тоже")
+    if est("! mcp_"):
+        stroki.append("! Отправка: правило «Разрешить?» добавлено, но коннектор в чате старой версии — пришлите отчёт организатору")
+    elif est("✓ Claude спрашивает", "✓ почта: .claude/settings.json") or est("✓ mcp_messendzhery", "✓ mcp_whatsapp"):
+        stroki.append("✓ Отправка: во вкладке Code Claude всегда спрашивает «Разрешить?» — в любом режиме, и в «Авто» тоже")
     if est("✓ проверка", "✓ CLAUDE.md: фраза"):
         stroki.append("✓ Новая фраза «Проверь коннекторы» — один отчёт по всем каналам")
-    stroki += [s for s in itog if s.startswith("!") and not s.startswith("! wa.py")]
+    stroki += [s for s in itog if s.startswith("!") and not s.startswith(("! wa.py", "! mcp_"))]
     return stroki or ["· Всё уже свежее — менять нечего"]
 
 
@@ -223,10 +264,11 @@ def main():
     wa = Path.home() / "WhatsApp-Claude"
     wa = wa if (wa / "SKRIPTY" / "wa.py").exists() else None
     if yavno and not sek:
-        sys.exit(f"В папке {yavno} нет AI-секретаря. Откройте Claude в папке 02_sekretar и повторите.")
+        sys.exit(f"В папке {yavno} нет AI-секретаря (нет CLAUDE.md и SKRIPTY/obshchee.py). "
+                 "Проверьте путь к папке 02_sekretar и запустите: python obnovit.py \"<путь к 02_sekretar>\"")
     if not sek and not wa:
         sys.exit("Не нашёл ни папку секретаря 02_sekretar, ни коннектор «WhatsApp в Claude». "
-                 "Откройте Claude в папке секретаря и повторите.")
+                 "Запустите обновление с путём к папке секретаря: python obnovit.py \"<путь к 02_sekretar>\"")
     print(f"ОБНОВЛЕНИЕ КОННЕКТОРОВ · версия {VERSIYA}", flush=True)
     print("Секретарь: " + (str(sek) if sek else "не найден") + " · WhatsApp в Claude: " + (str(wa) if wa else "не установлен"))
     itog, perezapusk = [], False
@@ -235,6 +277,9 @@ def main():
     if wa:
         perezapusk |= obnovit_wa_claude(wa, itog)
     perezapusk |= pravila_sprashivat(itog)
+    if not sek:
+        itog.append("! Папку секретаря не нашёл — обновлён только «WhatsApp в Claude». Если секретарь есть, "
+                    "запустите обновление с путём к нему: python obnovit.py \"<путь к 02_sekretar>\"")
     print("\n".join("  " + s for s in svodka(itog)), flush=True)
     for p in (sek, wa):
         if p:
